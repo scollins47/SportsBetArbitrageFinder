@@ -94,7 +94,7 @@ const checkForArbH2H = (nodes, title, betAmount=100) => {
             team1 = maxABookie;
             team2 = minHBookie;
         }
-        console.log(`Arbitrage Detected For Game ${title}:\n${team1}: ${minA} Away | ${team2}: ${maxH} Home | Outlay - ${test} `);
+        console.log(`Arbitrage Detected For Game ${title}:\n${team2}: ${maxH} -Home | ${team1}: ${minA} -Away |  Outlay - ${test} `);
         return true;
     }
     return false;
