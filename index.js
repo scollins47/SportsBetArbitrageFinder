@@ -210,7 +210,7 @@ async function main() {
     const games = parseData(data); // dictionary of the games.
 
     for (gameKey of Object.keys(games)) {
-        checkForArbH2H(games[gameKey].odds.h2h);
+        checkForArbH2H(games[gameKey].odds.h2h, gameKey);
         checkForArbTotals(games[gameKey].odds.totals, gameKey);
         fs.writeFileSync(`games/${gameKey}.json`, JSON.stringify(games[gameKey]), ()=>{});
     }
