@@ -1,11 +1,6 @@
-const express = require('express');
+// const express = require('express');
 const fs = require('fs');
-const app = express();
-const server = require('http').Server(app);
-app.use(express.static('public')); //listens to files in the
-
-app.use(express.json({ limit: '1mb' }));
-
+// const app = express();
 
 // api v
 // https://the-odds-api.com/liveapi/guides/v4/#parameters-2
@@ -83,6 +78,7 @@ const checkForArbH2H = (nodes, title, betAmount=100) => {
         const outlay = (1000 / minA) + (1000 / maxH);
         const outlay2 = (1000 / minH) + (1000 / maxA);
         const test = Math.max(outlay, outlay2);
+
         // console.log(`${test}:$ ${1000 - test}`);
     }
 
