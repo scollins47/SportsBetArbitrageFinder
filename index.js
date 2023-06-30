@@ -6,7 +6,7 @@ const fs = require('fs');
 // https://the-odds-api.com/liveapi/guides/v4/#parameters-2
 const URL = "https://api.the-odds-api.com/v4/"; 
 const API_KEY = process.env.API_KEY;
-const disallowedInUS = ["Matchbook", "Betfair", "1xBet"]
+const disallowedInUS = ["Matchbook", "Betfair", "1xBet", "Circa Sports"] // circa only in nevada iowa and colorado
 
 const errorCheck = (status) => {
     if (status !== 200) throw new Error("API Error, Error Code: " + status);
@@ -79,8 +79,11 @@ const checkForArbH2H = (nodes, title, betAmount=1000) => {
     const betAmountAway = (betAmount * odds2) / arbitrage;
 
     if (arbitrage < 100)
-        return (`Arbitrage found for ${title} :\n\t Home - ${maxHBookie} | Odds - ${maxH} $${betAmountHome} \n\t Away - ${maxABookie} | Odds - ${maxA} $${betAmountAway}`);
-    return "";
+        return (`Arbitrage found for ${title} :\n\t
+         Home - ${maxHBookie} | Odds - ${maxH} $${betAmountHome}\n\t 
+         Away - ${maxABookie} | Odds - ${maxA} $${betAmountAway}`
+         );
+    return -1;
 }
 
 // arbitrage check for over/under bets.
@@ -102,17 +105,23 @@ const checkForArbTotals = (nodes, title, betAmount=1000) => {
             maxUnder = Math.max(maxUnder, temp.price);
             bookieMXU =  maxUnder == temp.price ? temp.bookie: bookieMXU;
         }
-        const odds1 = (betAmount / maxUnder)
-        const odds2 =  (betAmount / maxOver);
-        const outlay = odds1 + odds2;
+        const odds1 = (1 / maxUnder) * 100
+        const odds2 =  (1 / maxOver) * 100;
+        const arbitrage = odds1 + odds2;
+        const betAmountHome = (betAmount * odds1) / arbitrage;
+        const betAmountAway = (betAmount * odds2) / arbitrage;
 
-        if (betAmount - outlay > 0) {
-            arbs.push(`Arbitrage found for ${title} O/U - ${point}:\n\t Over - ${bookieMXO} | Odds - ${maxOver}\n\t Under - ${bookieMXU} | Odds - ${maxUnder}`);
+        if (arbitrage < 100) {
+            arbs.push(`Arbitrage found for ${title} O/U - ${point}:\n\t 
+            Over - ${bookieMXO} | Odds - ${maxOver} $${betAmountHome}\n\t 
+            Under - ${bookieMXU} | Odds - ${maxUnder} $${betAmountAway}\n`
+            );
         }
     }
     return arbs.length > 0 ? arbs: -1;
 }
 
+//TODO: finish this
 const checkForArb3Way = async (eventID, sport_key, regions="us,us2") => {
     const finalUrl = `${URL}sports/${sport_key}/events/${eventID}/odds?apiKey=${API_KEY}&regions=${regions}&markets=h2h_3_way&dateFormat=unix`;
     const resp = await fetch(finalUrl);
@@ -189,14 +198,16 @@ async function main() {
     const data = await getOdds("upcoming", regions="us,us2");
 
     const games = parseData(data); // dictionary of the games.
+    // console.log(games);
     // loop through each event id.
     let arbs;
     for (gameKey of Object.keys(games)) {
         const data2 = await checkForArb3Way(games[gameKey].id, games[gameKey].sport_key); // -1 for no odds
+        // console.log(data2);
         arbs = checkForArbH2H(games[gameKey].odds.h2h, gameKey);
-        if (arbs !== -1 || arbs?.length > 0) console.log(arbs);
+        if (arbs !== -1 && arbs?.length > 0) console.log(arbs);
         arbs = checkForArbTotals(games[gameKey].odds.totals, gameKey);
-        if (arbs !== -1 || arbs?.length > 0) console.log(arbs);
+        if (arbs !== -1 && arbs?.length > 0) console.log(arbs);
         // fs.writeFileSync(`games/${games[gameKey].id}.json`, JSON.stringify(data2));
         // fs.writeFileSync(`games/${gameKey}.json`, JSON.stringify(games[gameKey]), ()=>{});
     }
