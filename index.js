@@ -6,6 +6,7 @@ const fs = require('fs');
 // https://the-odds-api.com/liveapi/guides/v4/#parameters-2
 const URL = "https://api.the-odds-api.com/v4/"; 
 const API_KEY = process.env.API_KEY;
+const disallowedInUS = ["Matchbook", "Betfair", "1xBet"]
 
 const errorCheck = (status) => {
     if (status !== 200) throw new Error("API Error, Error Code: " + status);
@@ -33,7 +34,7 @@ const getAllSports = async (onlyOutrights) => {
  * Format of return Object:
  * [
  *  {
- *      bookmakers: [ {
+ *      bookmakers: [ { // every "bookie" has their own markets for each "outcome" of any game
  *          markets: [ { outcomes: [{name, price}, {name, price}] } ]
  *      } ]
  *  },
@@ -43,30 +44,22 @@ const getOdds = async (sport, regions) => {
     let finalUrl = `${URL}sports/${sport}/odds/?apiKey=${API_KEY}&regions=${regions}&markets=h2h,totals&dateFormat=unix`;
     const resp =  await fetch(finalUrl);
     errorCheck(resp.status);
+    // console.log(resp);
     const data = await resp.json();
     return data;
 }
 
-const checkForArbH2H = (nodes, title, betAmount=100) => {
-    let minABookie = "";
+const checkForArbH2H = (nodes, title, betAmount=1000) => {
     let maxABookie = "";
     let maxHBookie = "";
-    let minHBookie = "";
-    let minA = minH = 99999999999;
-    let maxA = maxH = -1;
+    let maxA = -1;
+    let maxH = -1;
 
+    // track the max/min payout for each bookie
     for (node of nodes) {
+        if (disallowedInUS.includes(node.bookie)) continue;
         let tempH = parseFloat(node.home_odds.split(":")[1]);
         let tempA = parseFloat(node.away_odds.split(":")[1]);
-
-        if (tempA < minA) {
-            minABookie = node.bookie;
-            minA = tempA;
-        }
-        if (tempH < minH){
-            minHBookie = node.bookie;
-            minH = tempH;
-        }
         if (tempA > maxA){
             maxABookie = node.bookie;
             maxA = tempA;
@@ -75,70 +68,62 @@ const checkForArbH2H = (nodes, title, betAmount=100) => {
             maxHBookie = node.bookie;
             maxH = tempH;
         }
-        const outlay = (1000 / minA) + (1000 / maxH);
-        const outlay2 = (1000 / minH) + (1000 / maxA);
-        const test = Math.max(outlay, outlay2);
-
-        // console.log(`${test}:$ ${1000 - test}`);
     }
 
-    const outlay = (betAmount / minA) + (betAmount / maxH);
-    const outlay2 = (betAmount / minH) + (betAmount / maxA);
-    const test = Math.max(outlay, outlay2);
-    if (betAmount - test > 0) {
-        let team1, team2;
-        if (test === outlay){
-            team1 = minABookie;
-            team2 = maxHBookie;
-        } else {
-            team1 = maxABookie;
-            team2 = minHBookie;
-        }
-        console.log(`Arbitrage Detected For Game ${title}:\n${team2}: ${maxH} -Home | ${team1}: ${minA} -Away |  Outlay - ${test} `);
-        return true;
-    }
-    return false;
+    // percentage odds for each bet
+    const odds = (1 / maxH) * 100;
+    const odds2 = (1/maxA) * 100;
+    // arbitrage percentage.
+    const arbitrage = odds + odds2;
+    const betAmountHome = (betAmount * odds) / arbitrage;
+    const betAmountAway = (betAmount * odds2) / arbitrage;
+
+    if (arbitrage < 100)
+        return (`Arbitrage found for ${title} :\n\t Home - ${maxHBookie} | Odds - ${maxH} $${betAmountHome} \n\t Away - ${maxABookie} | Odds - ${maxA} $${betAmountAway}`);
+    return "";
 }
 
+// arbitrage check for over/under bets.
 const checkForArbTotals = (nodes, title, betAmount=1000) => {
-    let maxOver = -1, minOver = 9999, minUnder = 9999, maxUnder = -1;
-    let bookieMXO, bookieMNO, bookieMNU, bookieMXU;
-    if (Object.keys(nodes).length < 2) return false;
+    let maxOver = -1, maxUnder = -1;
+    let bookieMXO, bookieMXU;
+    let arbs = [];
+    if (Object.keys(nodes).length < 2) return arbs;
     for (const point of Object.keys(nodes)) {
-        // get the max and min betting lines for the over.
+        // get the max betting lines for the over bet.
         for(let temp of nodes[point].over) {
+            if (disallowedInUS.includes(temp.bookie)) continue;
             maxOver = Math.max(maxOver, temp.price);
-            minOver = Math.min(minOver, temp.price);
             bookieMXO =  maxOver == temp.price ? temp.bookie: bookieMXO;
-            bookieMNO = minOver == temp.price ? temp.bookie: bookieMNO;
         }
-        //get max and min, along with the bookies of the under.
+        //get max along with the bookies of the under bet.
         for(let temp of nodes[point].under) {
+            if (disallowedInUS.includes(temp.bookie)) continue;
             maxUnder = Math.max(maxUnder, temp.price);
-            minUnder = Math.min(minUnder, temp.price);
             bookieMXU =  maxUnder == temp.price ? temp.bookie: bookieMXU;
-            bookieMNU = minUnder == temp.price ? temp.bookie: bookieMNU;
         }
+        const odds1 = (betAmount / maxUnder)
+        const odds2 =  (betAmount / maxOver);
+        const outlay = odds1 + odds2;
 
-        const outlay = (betAmount / minUnder) + (betAmount / maxOver);
-        const outlay2 = (betAmount / minOver) + (betAmount / maxUnder);
-        const test = Math.max(outlay, outlay2);
-
-
-        // console.log(`TESTING: ${title}|${bookieMXO}:${maxOver} | ${bookieMNU}:${minUnder} = ${outlay}`);
-        // console.log(`TESTING: ${title}|${bookieMXU}:${maxUnder} | ${bookieMNO}:${minOver} = ${outlay2}`);
-
-        if (betAmount - test > 0) {
-            if (test == outlay) {
-                console.log(`Arbitrage Found: ${title} Over:${bookieMXO}/Under:${bookieMNU}: ${point}`);
-            } else {
-                console.log(`Arbitrage Found: ${title} Over:${bookieMXU}/Under:${bookieMNO}: ${point}`);
-            }
+        if (betAmount - outlay > 0) {
+            arbs.push(`Arbitrage found for ${title} O/U - ${point}:\n\t Over - ${bookieMXO} | Odds - ${maxOver}\n\t Under - ${bookieMXU} | Odds - ${maxUnder}`);
         }
     }
-    return false;
+    return arbs.length > 0 ? arbs: -1;
 }
 
+const checkForArb3Way = async (eventID, sport_key, regions="us,us2") => {
+    const finalUrl = `${URL}sports/${sport_key}/events/${eventID}/odds?apiKey=${API_KEY}&regions=${regions}&markets=h2h_3_way&dateFormat=unix`;
+    const resp = await fetch(finalUrl);
+    errorCheck(resp.status);
+    const data = await resp.json();
+    if (data?.bookmakers?.length > 0)
+        return data;
+    return -1;
+}
+
+// format data from api.
 const parseData = (data) => {
     const handleDate = (dateISO) => {
         const date = new Date(dateISO * 1000);
@@ -164,15 +149,10 @@ const parseData = (data) => {
         }        
         // only looking for moneylines. (head to head)
         for (let bookies of game.bookmakers) {
-            // const {outcomes} = bookies.markets.filter(d => d.key == "h2h")[0];
-
             // bookie name (draftkings, bet365 etc)
             const bookie = bookies?.title;
-            // const home_odds = outcomes[0].name + ":" + outcomes[0].price;
-            // const away_odds = outcomes[1].name + ":" + outcomes[1].price;
             for (let market of bookies.markets) {
                 let node2;
-                // console.log(market);
                 if (market.key.includes("h2h")) {
                     const home_odds = market.outcomes[0].name + ":" + market.outcomes[0].price;
                     const away_odds = market.outcomes[1].name + ":" + market.outcomes[1].price;
@@ -183,7 +163,7 @@ const parseData = (data) => {
                         away_odds,  // store the bookie title, and the odds in bookies.
                     }
                     node.odds.h2h.push(node2);
-                } else {
+                } else if (market.key.includes("totals")){
                     for (const i in market.outcomes){
                         const {name, price, point} = {...market.outcomes[i]}
                         if (!node?.odds?.totals[point]) node.odds.totals[point] = { over: [], under: []};
@@ -192,27 +172,33 @@ const parseData = (data) => {
                             price,
                         });
                     }
-                    // console.log(node.odds);
                 }
             }
         }
         
-        const gameKey = (home_team + "|" + away_team + "|" + start_time.toDateString()).replaceAll(" ", "_");
+        const gameKey = (home_team + " - HOME |" + away_team + " - AWAY|" + start_time.toDateString()).replaceAll(" ", "_");
         games[gameKey] = node;
     }
     return games;
 }
 
-async function main() {
 
-    const data = await getOdds("upcoming", regions="us,us2,uk,eu");
+
+async function main() { 
+
+    const data = await getOdds("upcoming", regions="us,us2");
 
     const games = parseData(data); // dictionary of the games.
-
+    // loop through each event id.
+    let arbs;
     for (gameKey of Object.keys(games)) {
-        checkForArbH2H(games[gameKey].odds.h2h, gameKey);
-        checkForArbTotals(games[gameKey].odds.totals, gameKey);
-        fs.writeFileSync(`games/${gameKey}.json`, JSON.stringify(games[gameKey]), ()=>{});
+        const data2 = await checkForArb3Way(games[gameKey].id, games[gameKey].sport_key); // -1 for no odds
+        arbs = checkForArbH2H(games[gameKey].odds.h2h, gameKey);
+        if (arbs !== -1 || arbs?.length > 0) console.log(arbs);
+        arbs = checkForArbTotals(games[gameKey].odds.totals, gameKey);
+        if (arbs !== -1 || arbs?.length > 0) console.log(arbs);
+        // fs.writeFileSync(`games/${games[gameKey].id}.json`, JSON.stringify(data2));
+        // fs.writeFileSync(`games/${gameKey}.json`, JSON.stringify(games[gameKey]), ()=>{});
     }
 
 }
